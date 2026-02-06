@@ -13,20 +13,29 @@ class PopulationController extends Controller
      * Lógica privada para aplicar filtros (Año, Género, Edad, Rango).
      * Se reutiliza en todos los endpoints.
      */
-    private function applyFilters($query, Request $request)
+    private function applyFilters($query, Request $request, $defaultToLatestYear = false)
     {
+        // 1. Filtro por Año
         if ($request->has('year')) {
+            // Si el usuario pide un año, usamos ese
             $query->where('year', $request->year);
+        } elseif ($defaultToLatestYear) {
+            // NUEVO: Si NO pide año y está activado el modo automático, buscamos el último
+            $maxYear = Population::max('year');
+            $query->where('year', $maxYear);
         }
 
+        // 2. Filtro por Género
         if ($request->has('gender')) {
             $query->where('gender', $request->gender);
         }
 
+        // 3. Filtro por Edad
         if ($request->has('age')) {
             $query->where('age', $request->age);
         }
 
+        // 4. Filtro por Rango
         if ($request->has('age_range')) {
             $range = explode('-', $request->age_range);
             if (count($range) == 2) {
@@ -85,13 +94,22 @@ class PopulationController extends Controller
     /**
      * 1. Datos por Municipio (con filtros y ordenación)
      */
-    public function byMunicipality(Request $request, $code)
+    // ENDPOINT 1: Datos por Municipio (Por Código o Nombre)
+    public function byMunicipality(Request $request, $term)
     {
-        $municipality = Municipality::where('code', $code)->first();
-        if (!$municipality) return response()->json(['error' => 'Municipio no encontrado'], 404);
+        // CAMBIO PRINCIPAL: Buscamos por código O por nombre exacto
+        $municipality = Municipality::where('code', $term)
+                                    ->orWhere('name', $term)
+                                    ->first();
+
+        if (!$municipality) {
+            return response()->json(['error' => 'Municipio no encontrado: ' . $term], 404);
+        }
 
         $query = Population::where('municipality_id', $municipality->id);
-        $query = $this->applyFilters($query, $request);
+        
+        // Filtro automático de año (Punto 1)
+        $query = $this->applyFilters($query, $request, true);
 
         // Ordenación
         $sortBy = $request->get('sort_by', 'default');
@@ -109,45 +127,72 @@ class PopulationController extends Controller
 
         return response()->json([
             'municipality' => $municipality->name,
+            'code' => $municipality->code, // Devolvemos el código para confirmar
             'filters_applied' => $request->all(),
+            'automatic_year' => !$request->has('year'),
             'total_records' => $data->count(),
             'data' => $data
         ]);
     }
 
-    /**
-     * 2. Datos por Isla (con filtros y ordenación)
-     */
-    public function byIsland(Request $request, $code)
+    // ENDPOINT 2: Datos por Isla (Por Código o Nombre)
+    // ENDPOINT 2: Datos por Isla (Con Total y opción Resumen)
+    public function byIsland(Request $request, $term)
     {
-        $island = Island::where('code', $code)->first();
-        if (!$island) return response()->json(['error' => 'Isla no encontrada'], 404);
+        // 1. Buscamos isla por código o nombre
+        $island = Island::where('code', $term)
+                        ->orWhere('name', $term)
+                        ->first();
 
+        if (!$island) {
+            return response()->json(['error' => 'Isla no encontrada: ' . $term], 404);
+        }
+
+        // 2. Preparamos la consulta
         $query = Population::with('municipality')
                     ->where('island_id', $island->id);
+        
+        // Filtro automático de año
+        $query = $this->applyFilters($query, $request, true);
 
-        $query = $this->applyFilters($query, $request);
-
-        // Ordenación
-        $sortBy = $request->get('sort_by', 'default');
-        $order = $request->get('order', 'desc');
-
-        if ($sortBy === 'population') {
-            $query->orderBy('population', $order);
+        // 3. Obtenemos los datos (siempre los traemos para poder sumar)
+        // Ordenación por defecto
+        if (!$request->has('sort_by')) {
+             $query->orderBy('municipality_id', 'asc')
+                   ->orderBy('year', 'desc');
         } else {
-            $query->orderBy('municipality_id', 'asc')
-                  ->orderBy('year', 'desc')
-                  ->orderBy('age', 'asc');
+             // Si el usuario pide ordenar, respetamos su orden
+             $sortBy = $request->get('sort_by');
+             $order = $request->get('order', 'desc');
+             if ($sortBy == 'population') $query->orderBy('population', $order);
         }
 
         $data = $query->get();
 
-        return response()->json([
+        // 4. CALCULO DEL TOTAL (Lo que pedían tus compañeros)
+        $totalPopulation = $data->sum('population');
+
+        // 5. Construimos la respuesta
+        $response = [
             'island' => $island->name,
+            'code' => $island->code,
             'filters_applied' => $request->all(),
+            'automatic_year' => !$request->has('year'),
+            
+            // EL DATO CLAVE: La suma total
+            'total_population' => $totalPopulation, 
+            
             'total_records' => $data->count(),
-            'data' => $data
-        ]);
+        ];
+
+        // 6. Lógica del "Desglose"
+        // Si NO ponen '?summary=true', enviamos la lista de datos.
+        // Si ponen '?summary=true', la respuesta se queda corta (solo el total).
+        if (!$request->has('summary')) {
+            $response['data'] = $data;
+        }
+
+        return response()->json($response);
     }
 
     /**
