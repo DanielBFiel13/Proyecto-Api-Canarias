@@ -24,16 +24,18 @@ class PopulationController extends Controller
         }
 
         // 2. Filtro por Género
-        if ($request->has('gender')) $query->where('gender', $request->gender);
+        if ($request->has('gender'))
+            $query->where('gender', $request->gender);
 
         // 3. Filtro por Edad
-        if ($request->has('age')) $query->where('age', $request->age);
+        if ($request->has('age'))
+            $query->where('age', $request->age);
 
         // 4. Filtro por Rango
         if ($request->has('age_range')) {
             $range = explode('-', $request->age_range);
             if (count($range) == 2) {
-                $query->whereBetween('age', [(int)$range[0], (int)$range[1]]);
+                $query->whereBetween('age', [(int) $range[0], (int) $range[1]]);
             }
         }
         return $query;
@@ -42,14 +44,14 @@ class PopulationController extends Controller
     private function calculateEvolution($query)
     {
         $data = $query->selectRaw('year, SUM(population) as total_population')
-                      ->groupBy('year')->orderBy('year', 'asc')->get();
+            ->groupBy('year')->orderBy('year', 'asc')->get();
         $evolution = [];
         $prev = null;
         foreach ($data as $rec) {
             $curr = $rec->total_population;
             $var = ($prev !== null) ? $curr - $prev : 0;
             $perc = ($prev > 0) ? round(($var / $prev) * 100, 2) . '%' : '0%';
-            $evolution[] = ['year' => $rec->year, 'population' => (int)$curr, 'variation_total' => $var, 'variation_percentage' => $perc];
+            $evolution[] = ['year' => $rec->year, 'population' => (int) $curr, 'variation_total' => $var, 'variation_percentage' => $perc];
             $prev = $curr;
         }
         return $evolution;
@@ -60,7 +62,7 @@ class PopulationController extends Controller
     #[OA\Get(
         path: '/population/municipality/{term}',
         summary: 'Obtener datos de un Municipio',
-        description: 'Busca por Código (35001) o Nombre (Agaete). Si no se especifica año, devuelve el más reciente automáticamente.',
+        description: 'Busca por Código (35001) o Nombre (Agaete). Si no se especifica año, devuelve el más reciente automáticamente. Incluye la suma total.',
         tags: ['Datos Demográficos'],
         parameters: [
             new OA\Parameter(name: 'term', in: 'path', required: true, description: 'Código o Nombre del municipio', schema: new OA\Schema(type: 'string')),
@@ -78,26 +80,34 @@ class PopulationController extends Controller
     public function byMunicipality(Request $request, $term)
     {
         $municipality = Municipality::where('code', $term)->orWhere('name', $term)->first();
-        if (!$municipality) return response()->json(['error' => 'Municipio no encontrado: ' . $term], 404);
+        if (!$municipality)
+            return response()->json(['error' => 'Municipio no encontrado: ' . $term], 404);
 
         $query = Population::where('municipality_id', $municipality->id);
-        
+
         // Filtro automático activado
         $query = $this->applyFilters($query, $request, true);
 
         $sortBy = $request->get('sort_by', 'default');
         $order = $request->get('order', 'desc');
 
-        if ($sortBy === 'population') $query->orderBy('population', $order);
-        elseif ($sortBy === 'age') $query->orderBy('age', $order);
-        else $query->orderBy('year', 'desc')->orderBy('age', 'asc');
+        if ($sortBy === 'population')
+            $query->orderBy('population', $order);
+        elseif ($sortBy === 'age')
+            $query->orderBy('age', $order);
+        else
+            $query->orderBy('year', 'desc')->orderBy('age', 'asc');
 
         $data = $query->get();
+
+        $totalPopulation = $data->sum('population');
+
         return response()->json([
             'municipality' => $municipality->name,
             'code' => $municipality->code,
             'filters_applied' => $request->all(),
             'automatic_year' => !$request->has('year'),
+            'total_population' => $totalPopulation,
             'total_records' => $data->count(),
             'data' => $data
         ]);
@@ -106,7 +116,7 @@ class PopulationController extends Controller
     #[OA\Get(
         path: '/population/island/{term}',
         summary: 'Obtener datos de una Isla (Total y Desglose)',
-        description: 'Busca por Código o Nombre. Devuelve la población total sumada. Usa summary=true para ocultar la lista detallada.',
+        description: 'Busca por Código o Nombre. Devuelve la población total sumada y un desglose por municipios. Usa summary=true para ocultar la lista detallada.',
         tags: ['Datos Demográficos'],
         parameters: [
             new OA\Parameter(name: 'term', in: 'path', required: true, description: 'Código o Nombre de la isla', schema: new OA\Schema(type: 'string')),
@@ -122,25 +132,38 @@ class PopulationController extends Controller
     public function byIsland(Request $request, $term)
     {
         $island = Island::where('code', $term)->orWhere('name', $term)->first();
-        if (!$island) return response()->json(['error' => 'Isla no encontrada: ' . $term], 404);
+        if (!$island)
+            return response()->json(['error' => 'Isla no encontrada: ' . $term], 404);
 
         $query = Population::with('municipality')->where('island_id', $island->id);
-        
+
         // Filtro automático activado
         $query = $this->applyFilters($query, $request, true);
 
         if (!$request->has('sort_by')) {
-             $query->orderBy('municipality_id', 'asc')->orderBy('year', 'desc');
+            $query->orderBy('municipality_id', 'asc')->orderBy('year', 'desc');
         } else {
-             $sortBy = $request->get('sort_by');
-             $order = $request->get('order', 'desc');
-             if ($sortBy == 'population') $query->orderBy('population', $order);
+            $sortBy = $request->get('sort_by');
+            $order = $request->get('order', 'desc');
+            if ($sortBy == 'population')
+                $query->orderBy('population', $order);
         }
 
         $data = $query->get();
-        
-        // Cálculo de totales
+
+        // 1. Cálculo del TOTAL GLOBAL
         $totalPopulation = $data->sum('population');
+
+        // 2. NUEVO: Desglose por Municipio (Agrupado y Sumado)
+        $breakdown = $data->groupBy(function($item) {
+            return $item->municipality->name;
+        })->map(function ($rows, $municipalityName) {
+            return [
+                'municipality' => $municipalityName,
+                'code' => $rows->first()->municipality->code,
+                'total_population' => $rows->sum('population')
+            ];
+        })->values();
 
         $response = [
             'island' => $island->name,
@@ -148,12 +171,17 @@ class PopulationController extends Controller
             'filters_applied' => $request->all(),
             'automatic_year' => !$request->has('year'),
             'total_population' => $totalPopulation,
+            'municipalities_count' => $breakdown->count(),
+            
+            // Aquí está la lista de municipios con su suma total:
+            'breakdown_by_municipality' => $breakdown,
+            
             'total_records' => $data->count(),
         ];
 
-        // Lógica de resumen
+        // Lógica de resumen (si NO piden summary, enviamos también los datos crudos)
         if (!$request->has('summary')) {
-            $response['data'] = $data;
+            $response['raw_data'] = $data;
         }
 
         return response()->json($response);
@@ -174,7 +202,8 @@ class PopulationController extends Controller
     public function evolutionByMunicipality(Request $request, $code)
     {
         $municipality = Municipality::where('code', $code)->first();
-        if (!$municipality) return response()->json(['error' => 'Municipio no encontrado'], 404);
+        if (!$municipality)
+            return response()->json(['error' => 'Municipio no encontrado'], 404);
 
         $query = Population::where('municipality_id', $municipality->id);
         $query = $this->applyFilters($query, $request); // Aquí false por defecto (todos los años)
@@ -195,7 +224,8 @@ class PopulationController extends Controller
     public function evolutionByIsland(Request $request, $code)
     {
         $island = Island::where('code', $code)->first();
-        if (!$island) return response()->json(['error' => 'Isla no encontrada'], 404);
+        if (!$island)
+            return response()->json(['error' => 'Isla no encontrada'], 404);
 
         $query = Population::where('island_id', $island->id);
         $query = $this->applyFilters($query, $request);
@@ -219,11 +249,11 @@ class PopulationController extends Controller
         $islands = Island::where('name', 'LIKE', "%{$text}%")->get();
         $municipalities = Municipality::where('name', 'LIKE', "%{$text}%")->with('island')->get();
 
-        $islandsFormatted = $islands->map(function($item) {
+        $islandsFormatted = $islands->map(function ($item) {
             return ['code' => $item->code, 'name' => $item->name, 'type' => 'Isla', 'island_name' => null];
         });
 
-        $municipalitiesFormatted = $municipalities->map(function($item) {
+        $municipalitiesFormatted = $municipalities->map(function ($item) {
             return ['code' => $item->code, 'name' => $item->name, 'type' => 'Municipio', 'island_name' => $item->island ? $item->island->name : null];
         });
 
