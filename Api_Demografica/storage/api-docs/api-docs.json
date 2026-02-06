@@ -1,0 +1,236 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "API Demográfica de Canarias",
+        "description": "Documentación de la API para consultar datos de población, evolución y estadísticas de las Islas Canarias.",
+        "contact": {
+            "email": "estudiante@ejemplo.com"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://127.0.0.1:8000/api",
+            "description": "Servidor Local"
+        }
+    ],
+    "paths": {
+        "/population/municipality/{term}": {
+            "get": {
+                "tags": [
+                    "Datos Demográficos"
+                ],
+                "summary": "Obtener datos de un Municipio",
+                "description": "Busca por Código (35001) o Nombre (Agaete). Si no se especifica año, devuelve el más reciente automáticamente.",
+                "operationId": "fae0fca75b4f8d81cd3a46825819c731",
+                "parameters": [
+                    {
+                        "name": "term",
+                        "in": "path",
+                        "description": "Código o Nombre del municipio",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "year",
+                        "in": "query",
+                        "description": "Año específico (Opcional)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "gender",
+                        "in": "query",
+                        "description": "Filtrar por género (Hombres, Mujeres)",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "age_range",
+                        "in": "query",
+                        "description": "Rango de edad (ej: 20-30)",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Ordenar por: population, age",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "order",
+                        "in": "query",
+                        "description": "asc o desc",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datos encontrados correctamente"
+                    },
+                    "404": {
+                        "description": "Municipio no encontrado"
+                    }
+                }
+            }
+        },
+        "/population/island/{term}": {
+            "get": {
+                "tags": [
+                    "Datos Demográficos"
+                ],
+                "summary": "Obtener datos de una Isla (Total y Desglose)",
+                "description": "Busca por Código o Nombre. Devuelve la población total sumada. Usa summary=true para ocultar la lista detallada.",
+                "operationId": "20f8f9b74596db264bee7fc5c72959a5",
+                "parameters": [
+                    {
+                        "name": "term",
+                        "in": "path",
+                        "description": "Código o Nombre de la isla",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "summary",
+                        "in": "query",
+                        "description": "Si es \"true\", solo devuelve el total (sin desglose)",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "year",
+                        "in": "query",
+                        "description": "Año específico (Opcional)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "gender",
+                        "in": "query",
+                        "description": "Filtrar por género",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datos encontrados"
+                    },
+                    "404": {
+                        "description": "Isla no encontrada"
+                    }
+                }
+            }
+        },
+        "/population/evolution/municipality/{code}": {
+            "get": {
+                "tags": [
+                    "Evolución y Estadísticas"
+                ],
+                "summary": "Evolución Anual (Municipio)",
+                "description": "Calcula la variación y porcentaje de crecimiento anual.",
+                "operationId": "a5b349a6d035a4d7ec4cdea25e21084c",
+                "parameters": [
+                    {
+                        "name": "code",
+                        "in": "path",
+                        "description": "Código del municipio",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cálculo exitoso"
+                    }
+                }
+            }
+        },
+        "/population/evolution/island/{code}": {
+            "get": {
+                "tags": [
+                    "Evolución y Estadísticas"
+                ],
+                "summary": "Evolución Anual (Isla)",
+                "operationId": "149de85776fe0d676389cc004af50811",
+                "parameters": [
+                    {
+                        "name": "code",
+                        "in": "path",
+                        "description": "Código de la isla",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cálculo exitoso"
+                    }
+                }
+            }
+        },
+        "/search/{text}": {
+            "get": {
+                "tags": [
+                    "Buscador"
+                ],
+                "summary": "Buscador General",
+                "description": "Busca islas y municipios por nombre o código parcial.",
+                "operationId": "736dd96fe9e797474eeaec6469ec3f2d",
+                "parameters": [
+                    {
+                        "name": "text",
+                        "in": "path",
+                        "description": "Texto a buscar",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Resultados encontrados"
+                    }
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Datos Demográficos",
+            "description": "Datos Demográficos"
+        },
+        {
+            "name": "Evolución y Estadísticas",
+            "description": "Evolución y Estadísticas"
+        },
+        {
+            "name": "Buscador",
+            "description": "Buscador"
+        }
+    ]
+}

@@ -6,34 +6,28 @@ use Illuminate\Http\Request;
 use App\Models\Municipality;
 use App\Models\Population;
 use App\Models\Island;
+use OpenApi\Attributes as OA; // Importante: Importamos los atributos de Swagger
 
 class PopulationController extends Controller
 {
-    /**
-     * Lógica privada para aplicar filtros (Año, Género, Edad, Rango).
-     * Se reutiliza en todos los endpoints.
-     */
+    // --- LÓGICA PRIVADA (No se documenta en Swagger) ---
+
     private function applyFilters($query, Request $request, $defaultToLatestYear = false)
     {
         // 1. Filtro por Año
         if ($request->has('year')) {
-            // Si el usuario pide un año, usamos ese
             $query->where('year', $request->year);
         } elseif ($defaultToLatestYear) {
-            // NUEVO: Si NO pide año y está activado el modo automático, buscamos el último
+            // Si NO pide año y está activado el modo automático, buscamos el último
             $maxYear = Population::max('year');
             $query->where('year', $maxYear);
         }
 
         // 2. Filtro por Género
-        if ($request->has('gender')) {
-            $query->where('gender', $request->gender);
-        }
+        if ($request->has('gender')) $query->where('gender', $request->gender);
 
         // 3. Filtro por Edad
-        if ($request->has('age')) {
-            $query->where('age', $request->age);
-        }
+        if ($request->has('age')) $query->where('age', $request->age);
 
         // 4. Filtro por Rango
         if ($request->has('age_range')) {
@@ -42,92 +36,66 @@ class PopulationController extends Controller
                 $query->whereBetween('age', [(int)$range[0], (int)$range[1]]);
             }
         }
-
         return $query;
     }
 
-    /**
-     * Lógica privada para calcular evolución (Totales por año y variación %).
-     */
     private function calculateEvolution($query)
     {
-        // Agrupamos por año y sumamos la población total de ese año
         $data = $query->selectRaw('year, SUM(population) as total_population')
-                      ->groupBy('year')
-                      ->orderBy('year', 'asc')
-                      ->get();
-
+                      ->groupBy('year')->orderBy('year', 'asc')->get();
         $evolution = [];
-        $previousPopulation = null;
-
-        foreach ($data as $record) {
-            $year = $record->year;
-            $currentPop = $record->total_population;
-            
-            $variation = 0;
-            $percentage = 0;
-
-            if ($previousPopulation !== null) {
-                $variation = $currentPop - $previousPopulation;
-                if ($previousPopulation > 0) {
-                    $percentage = round(($variation / $previousPopulation) * 100, 2);
-                }
-            }
-
-            $evolution[] = [
-                'year' => $year,
-                'population' => (int)$currentPop,
-                'variation_total' => $variation,
-                'variation_percentage' => $percentage . '%'
-            ];
-
-            $previousPopulation = $currentPop;
+        $prev = null;
+        foreach ($data as $rec) {
+            $curr = $rec->total_population;
+            $var = ($prev !== null) ? $curr - $prev : 0;
+            $perc = ($prev > 0) ? round(($var / $prev) * 100, 2) . '%' : '0%';
+            $evolution[] = ['year' => $rec->year, 'population' => (int)$curr, 'variation_total' => $var, 'variation_percentage' => $perc];
+            $prev = $curr;
         }
-
         return $evolution;
     }
 
-    // ==========================================
-    // ENDPOINTS PÚBLICOS
-    // ==========================================
+    // --- ENDPOINTS PÚBLICOS (Documentados con Atributos PHP 8) ---
 
-    /**
-     * 1. Datos por Municipio (con filtros y ordenación)
-     */
-    // ENDPOINT 1: Datos por Municipio (Por Código o Nombre)
+    #[OA\Get(
+        path: '/population/municipality/{term}',
+        summary: 'Obtener datos de un Municipio',
+        description: 'Busca por Código (35001) o Nombre (Agaete). Si no se especifica año, devuelve el más reciente automáticamente.',
+        tags: ['Datos Demográficos'],
+        parameters: [
+            new OA\Parameter(name: 'term', in: 'path', required: true, description: 'Código o Nombre del municipio', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'year', in: 'query', description: 'Año específico (Opcional)', schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'gender', in: 'query', description: 'Filtrar por género (Hombres, Mujeres)', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'age_range', in: 'query', description: 'Rango de edad (ej: 20-30)', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sort_by', in: 'query', description: 'Ordenar por: population, age', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'order', in: 'query', description: 'asc o desc', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Datos encontrados correctamente'),
+            new OA\Response(response: 404, description: 'Municipio no encontrado')
+        ]
+    )]
     public function byMunicipality(Request $request, $term)
     {
-        // CAMBIO PRINCIPAL: Buscamos por código O por nombre exacto
-        $municipality = Municipality::where('code', $term)
-                                    ->orWhere('name', $term)
-                                    ->first();
-
-        if (!$municipality) {
-            return response()->json(['error' => 'Municipio no encontrado: ' . $term], 404);
-        }
+        $municipality = Municipality::where('code', $term)->orWhere('name', $term)->first();
+        if (!$municipality) return response()->json(['error' => 'Municipio no encontrado: ' . $term], 404);
 
         $query = Population::where('municipality_id', $municipality->id);
         
-        // Filtro automático de año (Punto 1)
+        // Filtro automático activado
         $query = $this->applyFilters($query, $request, true);
 
-        // Ordenación
         $sortBy = $request->get('sort_by', 'default');
         $order = $request->get('order', 'desc');
 
-        if ($sortBy === 'population') {
-            $query->orderBy('population', $order);
-        } elseif ($sortBy === 'age') {
-            $query->orderBy('age', $order);
-        } else {
-            $query->orderBy('year', 'desc')->orderBy('age', 'asc');
-        }
+        if ($sortBy === 'population') $query->orderBy('population', $order);
+        elseif ($sortBy === 'age') $query->orderBy('age', $order);
+        else $query->orderBy('year', 'desc')->orderBy('age', 'asc');
 
         $data = $query->get();
-
         return response()->json([
             'municipality' => $municipality->name,
-            'code' => $municipality->code, // Devolvemos el código para confirmar
+            'code' => $municipality->code,
             'filters_applied' => $request->all(),
             'automatic_year' => !$request->has('year'),
             'total_records' => $data->count(),
@@ -135,59 +103,55 @@ class PopulationController extends Controller
         ]);
     }
 
-    // ENDPOINT 2: Datos por Isla (Por Código o Nombre)
-    // ENDPOINT 2: Datos por Isla (Con Total y opción Resumen)
+    #[OA\Get(
+        path: '/population/island/{term}',
+        summary: 'Obtener datos de una Isla (Total y Desglose)',
+        description: 'Busca por Código o Nombre. Devuelve la población total sumada. Usa summary=true para ocultar la lista detallada.',
+        tags: ['Datos Demográficos'],
+        parameters: [
+            new OA\Parameter(name: 'term', in: 'path', required: true, description: 'Código o Nombre de la isla', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'summary', in: 'query', description: 'Si es "true", solo devuelve el total (sin desglose)', schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'year', in: 'query', description: 'Año específico (Opcional)', schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'gender', in: 'query', description: 'Filtrar por género', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Datos encontrados'),
+            new OA\Response(response: 404, description: 'Isla no encontrada')
+        ]
+    )]
     public function byIsland(Request $request, $term)
     {
-        // 1. Buscamos isla por código o nombre
-        $island = Island::where('code', $term)
-                        ->orWhere('name', $term)
-                        ->first();
+        $island = Island::where('code', $term)->orWhere('name', $term)->first();
+        if (!$island) return response()->json(['error' => 'Isla no encontrada: ' . $term], 404);
 
-        if (!$island) {
-            return response()->json(['error' => 'Isla no encontrada: ' . $term], 404);
-        }
-
-        // 2. Preparamos la consulta
-        $query = Population::with('municipality')
-                    ->where('island_id', $island->id);
+        $query = Population::with('municipality')->where('island_id', $island->id);
         
-        // Filtro automático de año
+        // Filtro automático activado
         $query = $this->applyFilters($query, $request, true);
 
-        // 3. Obtenemos los datos (siempre los traemos para poder sumar)
-        // Ordenación por defecto
         if (!$request->has('sort_by')) {
-             $query->orderBy('municipality_id', 'asc')
-                   ->orderBy('year', 'desc');
+             $query->orderBy('municipality_id', 'asc')->orderBy('year', 'desc');
         } else {
-             // Si el usuario pide ordenar, respetamos su orden
              $sortBy = $request->get('sort_by');
              $order = $request->get('order', 'desc');
              if ($sortBy == 'population') $query->orderBy('population', $order);
         }
 
         $data = $query->get();
-
-        // 4. CALCULO DEL TOTAL (Lo que pedían tus compañeros)
+        
+        // Cálculo de totales
         $totalPopulation = $data->sum('population');
 
-        // 5. Construimos la respuesta
         $response = [
             'island' => $island->name,
             'code' => $island->code,
             'filters_applied' => $request->all(),
             'automatic_year' => !$request->has('year'),
-            
-            // EL DATO CLAVE: La suma total
-            'total_population' => $totalPopulation, 
-            
+            'total_population' => $totalPopulation,
             'total_records' => $data->count(),
         ];
 
-        // 6. Lógica del "Desglose"
-        // Si NO ponen '?summary=true', enviamos la lista de datos.
-        // Si ponen '?summary=true', la respuesta se queda corta (solo el total).
+        // Lógica de resumen
         if (!$request->has('summary')) {
             $response['data'] = $data;
         }
@@ -195,29 +159,39 @@ class PopulationController extends Controller
         return response()->json($response);
     }
 
-    /**
-     * 3. Evolución por Municipio
-     */
+    #[OA\Get(
+        path: '/population/evolution/municipality/{code}',
+        summary: 'Evolución Anual (Municipio)',
+        description: 'Calcula la variación y porcentaje de crecimiento anual.',
+        tags: ['Evolución y Estadísticas'],
+        parameters: [
+            new OA\Parameter(name: 'code', in: 'path', required: true, description: 'Código del municipio', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Cálculo exitoso')
+        ]
+    )]
     public function evolutionByMunicipality(Request $request, $code)
     {
         $municipality = Municipality::where('code', $code)->first();
         if (!$municipality) return response()->json(['error' => 'Municipio no encontrado'], 404);
 
         $query = Population::where('municipality_id', $municipality->id);
-        $query = $this->applyFilters($query, $request);
-
-        $evolution = $this->calculateEvolution($query);
-
-        return response()->json([
-            'municipality' => $municipality->name,
-            'filters_applied' => $request->all(),
-            'evolution' => $evolution
-        ]);
+        $query = $this->applyFilters($query, $request); // Aquí false por defecto (todos los años)
+        return response()->json(['municipality' => $municipality->name, 'filters_applied' => $request->all(), 'evolution' => $this->calculateEvolution($query)]);
     }
 
-    /**
-     * 4. Evolución por Isla
-     */
+    #[OA\Get(
+        path: '/population/evolution/island/{code}',
+        summary: 'Evolución Anual (Isla)',
+        tags: ['Evolución y Estadísticas'],
+        parameters: [
+            new OA\Parameter(name: 'code', in: 'path', required: true, description: 'Código de la isla', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Cálculo exitoso')
+        ]
+    )]
     public function evolutionByIsland(Request $request, $code)
     {
         $island = Island::where('code', $code)->first();
@@ -225,59 +199,35 @@ class PopulationController extends Controller
 
         $query = Population::where('island_id', $island->id);
         $query = $this->applyFilters($query, $request);
-
-        $evolution = $this->calculateEvolution($query);
-
-        return response()->json([
-            'island' => $island->name,
-            'filters_applied' => $request->all(),
-            'evolution' => $evolution
-        ]);
+        return response()->json(['island' => $island->name, 'filters_applied' => $request->all(), 'evolution' => $this->calculateEvolution($query)]);
     }
 
-    /**
-     * 5. Buscador General (Islas y Municipios)
-     */
-   /**
-     * 5. Buscador General (Islas y Municipios)
-     */
+    #[OA\Get(
+        path: '/search/{text}',
+        summary: 'Buscador General',
+        description: 'Busca islas y municipios por nombre o código parcial.',
+        tags: ['Buscador'],
+        parameters: [
+            new OA\Parameter(name: 'text', in: 'path', required: true, description: 'Texto a buscar', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Resultados encontrados')
+        ]
+    )]
     public function search($text)
     {
-        // Buscamos Islas
         $islands = Island::where('name', 'LIKE', "%{$text}%")->get();
-        
-        // Buscamos Municipios (cargando la relación 'island')
-        $municipalities = Municipality::where('name', 'LIKE', "%{$text}%")
-                            ->with('island')
-                            ->get();
+        $municipalities = Municipality::where('name', 'LIKE', "%{$text}%")->with('island')->get();
 
-        // Formateamos Islas
         $islandsFormatted = $islands->map(function($item) {
-            return [
-                'code' => $item->code,
-                'name' => $item->name,
-                'type' => 'Isla',
-                'island_name' => null
-            ];
+            return ['code' => $item->code, 'name' => $item->name, 'type' => 'Isla', 'island_name' => null];
         });
 
-        // Formateamos Municipios
         $municipalitiesFormatted = $municipalities->map(function($item) {
-            return [
-                'code' => $item->code,
-                'name' => $item->name,
-                'type' => 'Municipio',
-                'island_name' => $item->island ? $item->island->name : null
-            ];
+            return ['code' => $item->code, 'name' => $item->name, 'type' => 'Municipio', 'island_name' => $item->island ? $item->island->name : null];
         });
 
-        // CORRECCIÓN AQUÍ: Usamos 'concat' en vez de 'merge' para evitar el error getKey()
         $results = $islandsFormatted->concat($municipalitiesFormatted);
-
-        return response()->json([
-            'query' => $text,
-            'total_results' => $results->count(),
-            'results' => $results->values() // .values() es importante para reindexar el array JSON
-        ]);
+        return response()->json(['query' => $text, 'total_results' => $results->count(), 'results' => $results->values()]);
     }
 }
