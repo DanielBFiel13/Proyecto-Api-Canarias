@@ -6,11 +6,11 @@ use Illuminate\Http\Request;
 use App\Models\Municipality;
 use App\Models\Population;
 use App\Models\Island;
-use OpenApi\Attributes as OA; // Importante: Importamos los atributos de Swagger
+use OpenApi\Attributes as OA;
 
 class PopulationController extends Controller
 {
-    // --- LÓGICA PRIVADA (No se documenta en Swagger) ---
+    // --- LÓGICA PRIVADA ---
 
     private function applyFilters($query, Request $request, $defaultToLatestYear = false)
     {
@@ -55,7 +55,7 @@ class PopulationController extends Controller
         return $evolution;
     }
 
-    // --- ENDPOINTS PÚBLICOS (Documentados con Atributos PHP 8) ---
+    // --- ENDPOINTS PÚBLICOS ---
 
     #[OA\Get(
         path: '/population/municipality/{term}',

@@ -32,23 +32,20 @@ class PopulationSeeder extends Seeder
         $this->command->info('Iniciando importación final...');
 
         $handle = fopen($csvFile, "r");
-        fgetcsv($handle, 1000, ","); // Saltar cabecera
+        fgetcsv($handle, 1000, ",");
 
         $batch = [];
         $batchSize = 1000;
 
         while (($data = fgetcsv($handle, 2000, ",")) !== FALSE) {
-            // Validar longitud de fila
             if (count($data) < 15) continue;
-
             $medidaCode = $data[13]; 
             
             // FILTRO 1: Solo POBLACION
             if ($medidaCode !== 'POBLACION') continue;
-
             $territorioNombre = trim($data[0]);
             
-            // FILTRO 2: Excluir "Canarias" y Nombres de Islas (Solo queremos Municipios)
+            // FILTRO 2: Excluir "Canarias" y Nombres de Islas
             if ($territorioNombre === 'Canarias') continue;
             // Si el nombre corresponde a una isla, lo saltamos para evitar duplicidad con sus municipios
             if (isset($islandsMap[$territorioNombre])) continue; 
@@ -60,9 +57,7 @@ class PopulationSeeder extends Seeder
 
             $edadTexto = trim($data[6]);
             
-            // FILTRO 4: LIMPIEZA DE EDADES (EL ERROR ESTABA AQUÍ)
-            // Excluir rangos ("De "), el total ("Total")
-            // Y LAS TRAMPAS: "65 años o más" y "85 años o más" (exceptuando el de 100)
+            // FILTRO 4: Limpieza de rangos escapados
             if (str_contains($edadTexto, 'De ') || 
                 $edadTexto === 'Total' || 
                 $edadTexto === '65 años o más' || 
@@ -75,8 +70,6 @@ class PopulationSeeder extends Seeder
 
             // Convertir edad a número ("100 años o más" -> 100)
             $edadNumero = (int) filter_var($edadTexto, FILTER_SANITIZE_NUMBER_INT);
-
-            // Identificación
             $municipalityId = null;
             $islandId = null;
 
@@ -84,7 +77,6 @@ class PopulationSeeder extends Seeder
                 $municipalityId = $muniMap[$territorioNombre]['id'];
                 $islandId = $muniMap[$territorioNombre]['island_id'];
             } else {
-                // Si no es municipio (y ya filtramos islas arriba), lo ignoramos
                 continue; 
             }
 

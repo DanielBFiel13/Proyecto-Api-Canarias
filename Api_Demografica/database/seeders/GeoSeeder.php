@@ -34,8 +34,7 @@ class GeoSeeder extends Seeder
         
         $this->command->info('Islas revisadas correctamente.');
 
-        // 2. IMPORTAR MUNICIPIOS DESDE CSV
-        // Asegúrate de que el archivo está en database/data/municipios.csv
+        // 2. IMPORTAR MUNICIPIOS DESDE CSV EN DATABASE/DATA
         $csvFile = base_path('database/data/municipios.csv');
 
         if (!file_exists($csvFile)) {
@@ -44,19 +43,16 @@ class GeoSeeder extends Seeder
         }
 
         if (($handle = fopen($csvFile, "r")) !== FALSE) {
-            // Saltamos la cabecera. IMPORTANTE: El delimitador ahora es coma ","
             fgetcsv($handle, 1000, ","); 
 
             while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
-                // Verificamos que la línea tenga suficientes columnas para evitar errores
-                // Según tu captura, la isla es la columna 6 (índice 6)
                 if (count($data) < 7) {
                     continue; 
                 }
 
-                $municipalityCode = $data[0]; // 35001
-                $municipalityName = $data[2]; // Agaete
-                $islandCode = $data[6];       // ES705
+                $municipalityCode = $data[0];
+                $municipalityName = $data[2];
+                $islandCode = $data[6];
 
                 if (isset($islandMap[$islandCode])) {
                     Municipality::updateOrCreate(
